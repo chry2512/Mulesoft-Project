@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: Customer System API
+  version: 1.0.0
+  description: API per la consultazione e la creazione dei customer in Salesforce.
+servers:
+  - url: /api
+    description: Base path del listener Mule
+paths:
+  /customers:
+    get:
+      summary: Elenca i customer
+      operationId: listCustomers
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: email
+          in: query
+          description: Filtra per indirizzo email.
+          required: false
+          schema:
+            type: string
+            format: email
+        - name: customerId
+          in: query
+          description: Filtra per identificativo esterno Salesforce.
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Numero massimo di risultati. Viene limitato tra 1 e 200; il default e 50.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Elenco dei customer.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '502':
+          $ref: '#/components/responses/SalesforceUnauthorized'
+        '504':
+          $ref: '#/components/responses/SalesforceConnectivity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /customers/{customerId}:
+    get:
+      summary: Recupera un customer
+      operationId: getCustomerById
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: customerId
+          in: path
+          description: Identificativo esterno del customer.
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Customer trovato.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/SalesforceUnauthorized'
+        '504':
+          $ref: '#/components/responses/SalesforceConnectivity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /customers/createCustomer:
+    post:
+      summary: Crea o aggiorna un customer
+      description: Esegue un upsert del Contact Salesforce usando ExternalCustomerId__c come external ID.
+      operationId: createOrUpdateCustomer
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerInput'
+      responses:
+        '200':
+          description: Customer creato o aggiornato.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '502':
+          $ref: '#/components/responses/SalesforceUnauthorized'
+        '504':
+          $ref: '#/components/responses/SalesforceConnectivity'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      description: Identificativo per correlare richiesta, log e risposta.
+      required: false
+      schema:
+        type: string
+
+  headers:
+    CorrelationId:
+      description: Identificativo di correlazione restituito da Mule.
+      schema:
+        type: string
+
+  schemas:
+    Customer:
+      $ref: './schemas/customer.yaml'
+
+    CustomerInput:
+      $ref: './schemas/customer-input.yaml'
+
+    Error:
+      $ref: './schemas/error.yaml'
+
+  responses:
+    BadRequest:
+      description: Richiesta non valida.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Risorsa o customer non trovato.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnsupportedMediaType:
+      description: Content-Type non supportato.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SalesforceUnauthorized:
+      description: Autenticazione Salesforce fallita.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SalesforceConnectivity:
+      description: Salesforce non raggiungibile o timeout.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Errore interno inatteso.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

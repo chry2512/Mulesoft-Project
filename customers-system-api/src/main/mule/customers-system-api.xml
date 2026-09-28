@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+    xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+      http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+      ">
+
+    <!-- =========================================================
+         HTTP Listener + APIKit
+         ========================================================= -->
+    <http:listener-config name="customer-system-api-httpListenerConfig" doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="${http.port:8081}" />
+    </http:listener-config>
+
+    <apikit:config name="customer-system-api-config"
+                   api="resource::0603b857-4a4d-4076-9d63-1e26cf9691f0:customer-system-api:1.0.0:raml:zip:customer-system-api.raml"
+                   outboundHeadersMapName="outboundHeaders"
+                   httpStatusVarName="httpStatus" />
+
+    <!-- =========================================================
+         Salesforce Connector (Username-Password)
+         ========================================================= -->
+    <salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce SFDC config">
+        <salesforce:basic-connection
+                username="${sf.username}"
+                password="${sf.password}"
+                securityToken="${sf.token}" />
+    </salesforce:sfdc-config>
+
+    <!-- =========================================================
+         Main router flow
+         ========================================================= -->
+    <flow name="customer-system-api-main">
+        <http:listener config-ref="customer-system-api-httpListenerConfig" path="/api/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+
+        <!-- Correlation ID: propagate incoming or generate new -->
+        <ee:transform doc:name="Init Correlation Id">
+            <ee:variables>
+                <ee:set-variable variableName="correlationId"><![CDATA[%dw 2.0
+output application/java
+var incoming = attributes.headers.'x-correlation-id' default attributes.headers.'X-Correlation-Id' default null
+---
+incoming default uuid()
+]]></ee:set-variable>
+                <ee:set-variable variableName="outboundHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+{
+  "X-Correlation-Id": vars.correlationId
+}
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Request Log"
+                message='#[{
+                  "layer":"sapi",
+                  "api":"customer-system-api",
+                  "correlationId": vars.correlationId,
+                  "method": attributes.method,
+                  "path": attributes.requestPath,
+                  "query": attributes.queryParams
+                }]'/>
+
+        <apikit:router config-ref="customer-system-api-config" />
+
+        <error-handler>
+            <!-- APIKit validation errors -->
+            <on-error-propagate type="APIKIT:BAD_REQUEST">
+                <ee:transform doc:name="400 Bad Request">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "BAD_REQUEST",
+  message: "Bad request",
+  details: error.description default null
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="404 Not Found">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "NOT_FOUND",
+  message: "Resource not found"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED">
+                <ee:transform doc:name="405 Method Not Allowed">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "METHOD_NOT_ALLOWED",
+  message: "Method not allowed"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">405</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+                <ee:transform doc:name="415 Unsupported Media Type">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "UNSUPPORTED_MEDIA_TYPE",
+  message: "Unsupported media type"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">415</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <!-- Salesforce auth errors -->
+            <on-error-propagate type="SALESFORCE:INVALID_SESSION, SALESFORCE:UNAUTHORIZED, SALESFORCE:INVALID_CREDENTIALS" doc:name="401 Salesforce Unauthorized">
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "SF_UNAUTHORIZED",
+  message: "Salesforce authentication failed"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">502</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <!-- Connectivity/timeout to Salesforce -->
+            <on-error-propagate type="SALESFORCE:CONNECTIVITY, HTTP:CONNECTIVITY, HTTP:TIMEOUT" doc:name="504 Salesforce Timeout/Connectivity">
+                <ee:transform>
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "SF_CONNECTIVITY",
+  message: "Salesforce is temporarily unavailable"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">504</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+
+            <!-- Generic fallback -->
+            <on-error-propagate enableNotifications="true" logException="true" doc:name="500 Generic">
+                <ee:transform doc:name="500 Internal Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "INTERNAL_ERROR",
+  message: "Unexpected error"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">500</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+    <!-- =========================================================
+         Console (lasciata uguale, aggiungo correlation header)
+         ========================================================= -->
+    <flow name="customer-system-api-console">
+        <http:listener config-ref="customer-system-api-httpListenerConfig" path="/console/*" doc:name="Listener" allowedMethods="GET, POST">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:console config-ref="customer-system-api-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="404 Not Found">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ message: "Resource not found" }
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+    <!-- =========================================================
+         GET /customers  -> Salesforce query
+         Query params supported: email, customerId, limit
+         ========================================================= -->
+    <flow name="get:\customers:customer-system-api-config">
+
+        <ee:transform doc:name="Build SOQL + Params">
+            <ee:variables>
+                <ee:set-variable variableName="limit"><![CDATA[%dw 2.0
+output application/java
+var l = (attributes.queryParams.limit default 50) as Number
+---
+if (l > 200) 200 else if (l < 1) 1 else l
+]]></ee:set-variable>
+
+                <ee:set-variable variableName="soql"><![CDATA[%dw 2.0
+output application/java
+var email = attributes.queryParams.email default null
+var customerId = attributes.queryParams.customerId default null
+var whereParts = [
+  if (email != null and email != "") "Email = '" ++ (email replace "'" with "\\'") ++ "'" else null,
+  // Placeholder field name, adjust as needed:
+  if (customerId != null and customerId != "") "ExternalCustomerId__c = '" ++ (customerId replace "'" with "\\'") ++ "'" else null
+] filter ($ != null)
+
+var whereClause = if (sizeOf(whereParts) > 0) " WHERE " ++ (whereParts joinBy " AND ") else ""
+---
+"SELECT Id, FirstName, LastName, Email, ExternalCustomerId__c FROM Contact" ++ whereClause ++ " ORDER BY LastName ASC LIMIT " ++ (vars.limit as String)
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="SOQL Log"
+                message='#[{"correlationId":vars.correlationId, "soql": vars.soql}]'/>
+
+        <salesforce:query config-ref="Salesforce_Config" doc:name="SF Query Contacts">
+            <salesforce:salesforce-query><![CDATA[#[vars.soql]]]></salesforce:salesforce-query>
+        </salesforce:query>
+
+        <!-- Map Salesforce records -> Customer[] -->
+        <ee:transform doc:name="Map Contacts to Customers">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var recs = payload.records default payload default []
+---
+(recs map (c) -> {
+  customerId: c.ExternalCustomerId__c default c.Id,
+    fullName: trim((c.FirstName default "") ++ " " ++ (c.LastName default "")),
+  email: c.Email
+})
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+    <!-- =========================================================
+         GET /customers/{customerId} -> Salesforce query by external id
+         ========================================================= -->
+    <flow name="get:\customers\(customerId):customer-system-api-config">
+        <ee:transform doc:name="Capture customerId + Build SOQL">
+            <ee:variables>
+                <ee:set-variable variableName="customerId">attributes.uriParams.'customerId'</ee:set-variable>
+                <ee:set-variable variableName="soql"><![CDATA[%dw 2.0
+output application/java
+var id = vars.customerId as String
+---
+"SELECT Id, FirstName, LastName, Email, ExternalCustomerId__c FROM Contact WHERE ExternalCustomerId__c = '" ++ (id replace "'" with "\\'") ++ "' LIMIT 1"
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <salesforce:query config-ref="Salesforce_Config" doc:name="SF Query Contact by External Id">
+            <salesforce:salesforce-query><![CDATA[#[vars.soql]]]></salesforce:salesforce-query>
+        </salesforce:query>
+
+        <ee:transform doc:name="Map single Contact or 404">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/json
+var recs = payload.records default []
+var c = recs[0] default null
+---
+if (c == null)
+  null
+else
+{
+  customerId: c.ExternalCustomerId__c default c.Id,
+    fullName: trim((c.FirstName default "") ++ " " ++ (c.LastName default "")),
+  email: c.Email
+}
+]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <!-- if not found, raise 404 at API level -->
+                <ee:set-variable variableName="isNotFound"><![CDATA[%dw 2.0
+output application/java
+---
+(payload == null)
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <choice doc:name="If Not Found -> 404">
+            <when expression="#[vars.isNotFound]">
+                <ee:transform doc:name="404 Customer not found">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  correlationId: vars.correlationId,
+  errorCode: "NOT_FOUND",
+  message: "Customer not found"
+}
+]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </when>
+        </choice>
+    </flow>
+
+    <!-- =========================================================
+         POST /customers/createCustomer -> Salesforce upsert Contact
+         ========================================================= -->
+    <flow name="post:\customers\createCustomer:application\json:customer-system-api-config">
+
+        <!-- Basic input normalization -->
+        <ee:transform doc:name="Map Customer -> Contact for Upsert">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{
+  // for demo: map a few fields. Adjust names to your org.
+  FirstName: (payload.firstName default null),
+  LastName: (payload.lastName default null),
+  Email: (payload.email default null),
+  ExternalCustomerId__c: (payload.customerId default null)
+}
+]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="externalIdValue"><![CDATA[%dw 2.0
+output application/java
+---
+payload.customerId default null
+]]></ee:set-variable>
+                <ee:set-variable variableName="customerFullName"><![CDATA[%dw 2.0
+output application/java
+---
+trim((payload.firstName default "") ++ " " ++ (payload.lastName default ""))
+]]></ee:set-variable>
+                <ee:set-variable variableName="customerEmail"><![CDATA[%dw 2.0
+output application/java
+---
+payload.email default null
+]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Upsert using an External ID field -->
+        <salesforce:upsert config-ref="Salesforce_Config"
+                           doc:name="SF Upsert Contact"
+                           objectType="Contact"
+                           externalIdFieldName="ExternalCustomerId__c">
+            <salesforce:records>#[ [ payload ] ]</salesforce:records>
+        </salesforce:upsert>
+
+        <!-- After upsert, return the created/updated record (optional but useful) -->
+        <ee:transform doc:name="Build response (demo)">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var r = (payload[0] default payload)  // upsert returns array
+---
+{
+  customerId: vars.externalIdValue default (r.id default null),
+    fullName: vars.customerFullName,
+    email: vars.customerEmail
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+
+</mule>

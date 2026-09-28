@@ -1,0 +1,15 @@
+type: object
+properties:
+  customerId:
+    type: string
+    description: Valore usato come ExternalCustomerId__c per l'upsert.
+  firstName:
+    type: string
+  lastName:
+    type: string
+  email:
+    type: string
+    format: email
+required:
+  - customerId
+  - lastName

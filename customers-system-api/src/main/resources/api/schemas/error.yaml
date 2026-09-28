@@ -1,0 +1,13 @@
+type: object
+properties:
+  correlationId:
+    type: string
+  errorCode:
+    type: string
+  message:
+    type: string
+  details:
+    nullable: true
+required:
+  - errorCode
+  - message

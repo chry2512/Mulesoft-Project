@@ -1,0 +1,14 @@
+type: object
+properties:
+  customerId:
+    type: string
+    description: ExternalCustomerId__c Salesforce, oppure Id Salesforce come fallback.
+  fullName:
+    type: string
+  email:
+    type: string
+    format: email
+    nullable: true
+required:
+  - customerId
+  - fullName
