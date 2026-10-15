@@ -4,7 +4,7 @@ Questo repository contiene l'implementazione della **Customer System API**.
 L'API funge da livello di *System API* nell'architettura API-led di MuleSoft, esponendo e gestendo l'interazione diretta con il CRM **Salesforce** .
 
 
-## 📋 Indice
+## Indice
 1. [Panoramica dell'Architettura](#-panoramica-dellarchitettura)
 2. [Specifiche Tecniche & Endpoint](#-specifiche-tecniche--endpoint)
 3. [Dettaglio dei Flussi MuleSoft (Canvas Viewer)](#-dettaglio-dei-flussi-mulesoft-canvas-viewer)
