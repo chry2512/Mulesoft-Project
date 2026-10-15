@@ -1,8 +1,8 @@
-# Customer System API (MuleSoft 4)
+# Customer System API 
 
-Questo repository contiene l'implementazione della **Customer System API**, sviluppata sulla piattaforma **MuleSoft (Mule Runtime 4)**. L'API funge da livello di *System API* nell'architettura API-led di MuleSoft, esponendo e gestendo l'interazione diretta con il CRM **Salesforce** (oggetto `Contact`).
+Questo repository contiene l'implementazione della **Customer System API**.
+L'API funge da livello di *System API* nell'architettura API-led di MuleSoft, esponendo e gestendo l'interazione diretta con il CRM **Salesforce** .
 
----
 
 ## 📋 Indice
 1. [Panoramica dell'Architettura](#-panoramica-dellarchitettura)
@@ -14,13 +14,13 @@ Questo repository contiene l'implementazione della **Customer System API**, svil
    - [4. get:\customers\(customerId)](#4-getcustomerscustomerid)
    - [5. post:\customers\createCustomer](#5-postcustomerscreatecustomer)
 4. [Gestione degli Errori & Tracciamento](#-gestione-degli-errori--tracciamento)
-5. [Configurazione ed Esecuzione](#-configurazione-ed-esecuzione)
+5. [Configurazione](#-configurazione)
 
----
 
-## 🏛 Panoramica dell'Architettura
 
-La **Customer System API** astrae il layer applicativo sottostante (Salesforce CRM) fornendo un'interfaccia REST moderna, validata tramite specifica OpenAPI / APIKit.
+## Panoramica dell'Architettura
+
+La **Customer System API** astrae il layer applicativo sottostante (Salesforce CRM) fornendo un'interfaccia REST.
 
 - **Layer**: System API (API-led Connectivity)
 - **Runtime**: Mule Runtime 4.x
@@ -30,9 +30,9 @@ La **Customer System API** astrae il layer applicativo sottostante (Salesforce C
   - `Salesforce Connector` (interrogazioni SOQL e operazioni di Upsert sull'oggetto standard `Contact`)
 - **Tracciabilità**: Gestione dell'header `X-Correlation-Id` lungo tutto il ciclo di vita della richiesta e nei log strutturati JSON.
 
----
 
-## 🔌 Specifiche Tecniche & Endpoint
+
+## Specifiche Tecniche & Endpoint
 
 Porta di default: `8081` (configurabile tramite `http.port`).
 
@@ -41,15 +41,14 @@ Porta di default: `8081` (configurabile tramite `http.port`).
 | `GET` | `/api/customers` | Ricerca ed elenco dei clienti (Contact) con filtri per `email`, `customerId` e paginazione tramite `limit`. |
 | `GET` | `/api/customers/{customerId}` | Recupero puntuale del singolo cliente tramite chiave esterna (`ExternalCustomerId__c`). Se non presente, solleva un `404 Not Found`. |
 | `POST` | `/api/customers/createCustomer` | Creazione o aggiornamento (*upsert*) del contatto Salesforce tramite External ID (`ExternalCustomerId__c`). |
-| `GET` | `/console/*` | Console API interattiva (APIKit Console) per consultazione documentale e test. |
 
----
 
-## 🖼 Dettaglio dei Flussi MuleSoft (Canvas Viewer)
 
-Di seguito vengono analizzati nel dettaglio i componenti e la sequenza dei flussi visibili nell'interfaccia grafica (Canvas Viewer di Anypoint Studio / VS Code Extension).
 
----
+## Dettaglio dei Flussi MuleSoft (Canvas Viewer)
+
+Di seguito vengono analizzati nel dettaglio i componenti e la sequenza dei flussi visibili nell'interfaccia grafica:
+
 
 ### 1. customer-system-api-main
 
@@ -77,7 +76,6 @@ Questo è il flusso principale d'ingresso dell'applicazione, responsabile del ci
    - `On error propagate [SALESFORCE:CONNECTIVITY, HTTP:TIMEOUT, ...]` (504 Salesforce Timeout/Connectivity): gestisce timeout o mancata raggiungibilità di Salesforce restituendo HTTP 504 Gateway Timeout.
    - `On error propagate [500 Generic]`: gestisce qualsiasi eccezione imprevista restituendo HTTP 500 Internal Error con `correlationId`.
 
----
 
 ### 2. customer-system-api-console
 
@@ -103,8 +101,8 @@ Flusso che gestisce la ricerca e l'estrazione massiva o filtrata dei clienti da 
 
 #### Componenti del flusso:
 1. **Build SOQL + Params (Transform Message)**:
-   - Normalizza il parametro di paginazione `limit` (compreso tra 1 e 200, con fallback di default a 50).
-   - Sanitizza i filtri opzionali (`email`, `customerId`) per prevenire injection e compone dinamicamente la clausola `WHERE` della query SOQL.
+   - Normalizza il parametro di paginazione `limit` 
+   - Sanitizza i filtri opzionali (`email`, `customerId`) .
    - Assegna alla variabile `vars.soql` la query su Salesforce:
      ```sql
      SELECT Id, FirstName, LastName, Email, ExternalCustomerId__c 
@@ -158,11 +156,10 @@ Flusso per il recupero puntuale di un singolo cliente in base al suo identificat
    - **Branch `Otherwise`**:
      - Lascia fluire il payload correttamente mappato al client con codice HTTP 200.
 
----
 
 ### 5. post:\customers\createCustomer
 
-Flusso deputato alla creazione o aggiornamento idempotente di un cliente (*Upsert*) all'interno di Salesforce.
+Flusso deputato alla creazione o aggiornamento  di un cliente (*Upsert*) all'interno di Salesforce.
 
 ![post:\customers\createCustomer](docs/images/05_post-create-customer.png)
 
@@ -171,15 +168,15 @@ Flusso deputato alla creazione o aggiornamento idempotente di un cliente (*Upser
    - Riceve il payload JSON in ingresso contenente i dati del cliente (`firstName`, `lastName`, `email`, `customerId`).
    - Salva i dati essenziali in variabili d'appoggio (`externalIdValue`, `customerFullName`, `customerEmail`).
    - Converte i dati in formato Java Map per Salesforce, assegnando il campo identificativo a `ExternalCustomerId__c`.
-2. **SF Upsert Contact (Salesforce Upsert)**:
+2. **SF Upsert Contact **:
    - Esegue l'operazione di `Upsert` sull'oggetto Salesforce `Contact`.
    - Utilizza il campo personalizzato `ExternalCustomerId__c` come chiave di riconciliazione (se il record esiste già viene aggiornato, altrimenti ne viene inserito uno nuovo evitando duplicati).
-3. **Build response (demo) (Transform Message)**:
+3. **Build response **:
    - Modella la risposta JSON finale verso il chiamante, confermando l'avvenuta sincronizzazione e restituendo l'entità creata/aggiornata con `customerId`, `fullName` ed `email`.
 
----
 
-## 🛡 Gestione degli Errori & Tracciamento
+
+## Gestione degli Errori & Tracciamento
 
 Tutte le risposte di errore prodotte dall'API seguono uno standard uniforme:
 
@@ -193,11 +190,11 @@ Tutte le risposte di errore prodotte dall'API seguono uno standard uniforme:
 ```
 
 - **Correlation ID**: Ogni richiesta è tracciabile univocamente end-to-end tramite l'header `X-Correlation-Id`.
-- **Fault-Tolerance**: Gli errori di connettività verso Salesforce o di credenziali scadute vengono intercettati e rimappati in status code coerenti verso il chiamante (`502` / `504`), evitando di esporre stacktrace interni.
+- **Fault-Tolerance**: Gli errori di connettività verso Salesforce o di credenziali scadute vengono intercettati e rimappati in status code coerenti verso il chiamante (`502` / `504`).
 
 ---
 
-## ⚙️ Configurazione ed Esecuzione
+## Configurazione 
 
 ### Prerequisiti
 - **Anypoint Studio** 7.x o estensione **MuleSoft per VS Code**
@@ -206,7 +203,7 @@ Tutte le risposte di errore prodotte dall'API seguono uno standard uniforme:
 - Account e credenziali di accesso a una Org Salesforce (con Security Token abilitato).
 
 ### Proprietà di Configurazione
-Definire le credenziali in un file di properties (es. `config-local.yaml` o runtime properties):
+Definire le credenziali:
 
 ```yaml
 http:
@@ -218,15 +215,4 @@ sf:
   token: "tuo-security-token"
 ```
 
-### Build ed Esecuzione
-Per compilare ed eseguire i test MUnit:
-```bash
-mvn clean test
-```
-
-Per avviare l'applicazione localmente da riga di comando:
-```bash
-mvn clean mule:run
-```
-Accedere alla console API all'indirizzo: `http://localhost:8081/console/`
 
